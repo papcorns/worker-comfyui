@@ -1,5 +1,5 @@
 # Stage 1: Base image with common dependencies
-FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04 AS base
+FROM gcr.io/cloud-run/nvidia-cuda:12.2-runtime AS base
 
 # Prevents prompts from packages asking for user input during installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -9,6 +9,11 @@ ENV PIP_PREFER_BINARY=1
 ENV PYTHONUNBUFFERED=1
 # Speed up some cmake builds
 ENV CMAKE_BUILD_PARALLEL_LEVEL=8
+# GPU environment variables for Cloud Run
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+# PyTorch CUDA memory management
+ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:64
 
 # Install Python, git and other necessary tools
 RUN apt-get update && apt-get install -y \
@@ -41,7 +46,7 @@ ENV PATH="/opt/venv/bin:${PATH}"
 RUN uv pip install comfy-cli pip setuptools wheel
 
 # Install ComfyUI
-RUN /usr/bin/yes | comfy --workspace /comfyui install --version 0.3.30 --cuda-version 12.6 --nvidia
+RUN /usr/bin/yes | comfy --workspace /comfyui install --version 0.3.30 --cuda-version 12.2 --nvidia
 
 # Change working directory to ComfyUI
 WORKDIR /comfyui
@@ -53,10 +58,11 @@ ADD src/extra_model_paths.yaml ./
 WORKDIR /
 
 # Install Python runtime dependencies for the handler
-RUN uv pip install runpod requests websocket-client
+RUN uv pip install functions-framework flask websocket-client requests
 
 # Add application code and scripts
-ADD src/start.sh handler.py test_input.json ./
+ADD main.py service.py test_input.json ./
+ADD src/start.sh handler.py ./
 RUN chmod +x /start.sh
 
 # Add script to install custom nodes
@@ -71,7 +77,7 @@ COPY scripts/comfy-manager-set-mode.sh /usr/local/bin/comfy-manager-set-mode
 RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 
 # Set the default command to run when starting the container
-CMD ["/start.sh"]
+CMD ["functions-framework", "--target=app", "--port=8080"]
 
 # Stage 2: Download models
 FROM base AS downloader
@@ -120,3 +126,16 @@ FROM base AS final
 
 # Copy models from stage 2 to the final image
 COPY --from=downloader /comfyui/models /comfyui/models
+
+# Copy application files to final image
+COPY --from=base /main.py /service.py /
+COPY --from=base /start.sh /handler.py /test_input.json /
+
+# Expose port 8080 for Cloud Run
+EXPOSE 8080
+
+# Set working directory
+WORKDIR /
+
+# Final CMD for Cloud Run
+CMD ["functions-framework", "--target=app", "--port=8080"]

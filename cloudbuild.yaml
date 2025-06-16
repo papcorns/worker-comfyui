@@ -1,0 +1,41 @@
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/comfyui:${SHORT_SHA}',
+      '-t', '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/comfyui:latest',
+      '--build-arg', 'MODEL_TYPE=${_MODEL_TYPE}',
+      '--build-arg', 'HUGGINGFACE_ACCESS_TOKEN=${_HUGGINGFACE_ACCESS_TOKEN}',
+      '.'
+    ]
+    timeout: '1800s'  # 30 minutes for model downloads
+
+  # Push the Docker image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'push', 
+      '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/comfyui:${SHORT_SHA}'
+    ]
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'push', 
+      '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/comfyui:latest'
+    ]
+
+# Substitutions for build variables
+substitutions:
+  _REGION: 'us-central1'
+  _REPOSITORY: 'comfyui'
+  _MODEL_TYPE: 'flux1-dev-fp8'
+  _HUGGINGFACE_ACCESS_TOKEN: ''
+
+# Build options
+options:
+  machineType: 'E2_HIGHCPU_8'
+  diskSizeGb: '100'
+  logging: CLOUD_LOGGING_ONLY
+
+# Build timeout
+timeout: '2400s'  # 40 minutes total
