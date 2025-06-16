@@ -1,0 +1,7 @@
+fastapi
+python-multipart
+boto3
+google-cloud-storage
+websocket-client
+requests
+functions-framework==3.* 

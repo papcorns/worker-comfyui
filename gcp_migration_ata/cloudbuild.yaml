@@ -1,0 +1,15 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: [
+    'build',
+    '-t',
+    '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/worker-comfyui:latest',
+    '-f',
+    'gcp_migration/Dockerfile',
+    '.'
+  ]
+images:
+- '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/worker-comfyui:latest'
+substitutions:
+  _REGION: us-central1
+  _REPO_NAME: comfyui-repo 
