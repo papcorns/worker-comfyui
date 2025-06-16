@@ -5,7 +5,7 @@ steps:
     '-t',
     '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/worker-comfyui:latest',
     '-f',
-    'gcp_migration/Dockerfile',
+    'gcp_migration_ata/Dockerfile',
     '.'
   ]
 images:
