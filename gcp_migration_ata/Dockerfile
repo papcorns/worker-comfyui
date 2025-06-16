@@ -52,7 +52,7 @@ RUN pip install -r requirements.txt
 COPY main.py .
 # Copy the models config from the parent src directory.
 # The build context should be the root of the repository.
-COPY ../src/extra_model_paths.yaml /comfyui/
+COPY ../src/cloudbuild.yaml /comfyui/
 
 # Expose port 8080 as required by Cloud Run
 EXPOSE 8080
