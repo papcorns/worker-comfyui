@@ -6,7 +6,7 @@
 set -e
 
 # Default values
-PROJECT_ID=${1:-"your-project-id"}
+PROJECT_ID=${1:-"papcorns-internal"}
 REGION=${2:-"us-central1"}
 IMAGE_TAG=${3:-"latest"}
 SERVICE_NAME="comfyui"
