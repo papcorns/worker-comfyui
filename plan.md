@@ -14,7 +14,7 @@ This document lists – **in order** – the concrete changes required to run th
 ## 1. Repository layout changes
 | # | Task | Why |
 |---|------|-----|
-|1.1|Add `main.py` entrypoint exposing an HTTP **Flask**/**FastAPI** app compatible with **Functions Framework**.|Cloud Run starts the container by running the Functions Framework target.
+|1.1|Add `main.py` entrypoint exposing HTTP functions compatible with **Functions Framework** (no Flask/FastAPI wrapper needed).|Cloud Run starts the container by running the Functions Framework target.
 |1.2|Move existing startup logic (currently inside `start.sh` or equivalent) into `create_app()` or `main()` in `main.py`.|
 |1.3|Ensure `/healthz` and `/` routes return 200 quickly (used for health-checks).|
 |1.4|Refactor `handler.py` to REMOVE **runpod** SDK (`runpod.*`) and expose functions via the new HTTP app.|Runpod-specific serverless utilities are not available in Cloud Run.
@@ -29,7 +29,6 @@ This document lists – **in order** – the concrete changes required to run th
 2.1  Add:  
 ```
 functions-framework==3.*
-Flask==3.*  # if not using FastAPI
 ```
 2.2  Pin GPU-related libs (torch, xformers, torchvision) to **CUDA 12.1** wheels (these run on the Cloud Run CUDA 12.2 runtime for L4).
 
@@ -125,5 +124,5 @@ gcloud run deploy comfyui \
 > **Test 10**: Billing dashboard shows zero Runpod spend.
 
 ---
-## Done ✅
+## Done 
 When every **Test** passes, migration is complete.

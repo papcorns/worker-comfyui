@@ -1,16 +1,14 @@
 # worker-comfyui
 
-> [ComfyUI](https://github.com/comfyanonymous/ComfyUI) as a serverless API on [RunPod](https://www.runpod.io/)
+> [ComfyUI](https://github.com/comfyanonymous/ComfyUI) as a serverless API on [Google Cloud Run](https://cloud.google.com/run) with L4 GPU
 
 <p align="center">
   <img src="assets/worker_sitting_in_comfy_chair.jpg" title="Worker sitting in comfy chair" />
 </p>
 
-[![RunPod](https://api.runpod.io/badge/runpod-workers/worker-comfyui)](https://www.runpod.io/console/hub/runpod-workers/worker-comfyui)
-
 ---
 
-This project allows you to run ComfyUI workflows as a serverless API endpoint on the RunPod platform. Submit workflows via API calls and receive generated images as base64 strings or S3 URLs.
+This project allows you to run ComfyUI workflows as a serverless API endpoint on Google Cloud Run with L4 GPU support. Submit workflows via HTTP API calls and receive generated images as base64 strings.
 
 ## Table of Contents
 
@@ -19,154 +17,174 @@ This project allows you to run ComfyUI workflows as a serverless API endpoint on
 - [API Specification](#api-specification)
 - [Usage](#usage)
 - [Getting the Workflow JSON](#getting-the-workflow-json)
+- [Deployment](#deployment)
+- [Environment Variables](#environment-variables)
 - [Further Documentation](#further-documentation)
 
 ---
 
 ## Quickstart
 
-1.  🐳 Choose one of the [available Docker images](#available-docker-images) for your serverless endpoint (e.g., `runpod/worker-comfyui:<version>-sd3`).
-2.  📄 Follow the [Deployment Guide](docs/deployment.md) to set up your RunPod template and endpoint.
-3.  ⚙️ Optionally configure the worker (e.g., for S3 upload) using environment variables - see the full [Configuration Guide](docs/configuration.md).
+1.  🐳 Build one of the [available Docker images](#available-docker-images) for your Cloud Run service.
+2.  📄 Follow the [Deployment](#deployment) section to deploy to Google Cloud Run.
+3.  ⚙️ Optionally configure the worker using environment variables.
 4.  🧪 Pick an example workflow from [`test_resources/workflows/`](./test_resources/workflows/) or [get your own](#getting-the-workflow-json).
 5.  🚀 Follow the [Usage](#usage) steps below to interact with your deployed endpoint.
 
 ## Available Docker Images
 
-These images are available on Docker Hub under `runpod/worker-comfyui`:
+Build these images with different model configurations:
 
-- **`runpod/worker-comfyui:<version>-base`**: Clean ComfyUI install with no models.
-- **`runpod/worker-comfyui:<version>-flux1-schnell`**: Includes checkpoint, text encoders, and VAE for [FLUX.1 schnell](https://huggingface.co/black-forest-labs/FLUX.1-schnell).
-- **`runpod/worker-comfyui:<version>-flux1-dev`**: Includes checkpoint, text encoders, and VAE for [FLUX.1 dev](https://huggingface.co/black-forest-labs/FLUX.1-dev).
-- **`runpod/worker-comfyui:<version>-sdxl`**: Includes checkpoint and VAEs for [Stable Diffusion XL](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0).
-- **`runpod/worker-comfyui:<version>-sd3`**: Includes checkpoint for [Stable Diffusion 3 medium](https://huggingface.co/stabilityai/stable-diffusion-3-medium).
-
-Replace `<version>` with the current release tag, check the [releases page](https://github.com/runpod-workers/worker-comfyui/releases) for the latest version.
+- **`MODEL_TYPE=base`**: Clean ComfyUI install with no models.
+- **`MODEL_TYPE=flux1-schnell`**: Includes checkpoint, text encoders, and VAE for [FLUX.1 schnell](https://huggingface.co/black-forest-labs/FLUX.1-schnell).
+- **`MODEL_TYPE=flux1-dev`**: Includes checkpoint, text encoders, and VAE for [FLUX.1 dev](https://huggingface.co/black-forest-labs/FLUX.1-dev).
+- **`MODEL_TYPE=flux1-dev-fp8`**: Includes FP8 quantized checkpoint for [FLUX.1 dev](https://huggingface.co/Comfy-Org/flux1-dev) (default).
+- **`MODEL_TYPE=sdxl`**: Includes checkpoint and VAEs for [Stable Diffusion XL](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0).
+- **`MODEL_TYPE=sd3`**: Includes checkpoint for [Stable Diffusion 3 medium](https://huggingface.co/stabilityai/stable-diffusion-3-medium).
 
 ## API Specification
 
-The worker exposes standard RunPod serverless endpoints (`/run`, `/runsync`, `/health`). By default, images are returned as base64 strings. You can configure the worker to upload images to an S3 bucket instead by setting specific environment variables (see [Configuration Guide](docs/configuration.md)).
+The worker exposes HTTP endpoints compatible with Google Cloud Run:
 
-Use the `/runsync` endpoint for synchronous requests that wait for the job to complete and return the result directly. Use the `/run` endpoint for asynchronous requests that return immediately with a job ID; you'll need to poll the `/status` endpoint separately to get the result.
+- **`GET /`**: Basic service information
+- **`GET /healthz`**: Health check endpoint for Cloud Run
+- **`POST /predict`**: Main prediction endpoint for workflow execution
+- **`GET /models`**: Get available models information
 
-### Input
+### Request Format
 
-```json
-{
-  "input": {
-    "workflow": {
-      "6": {
-        "inputs": {
-          "text": "a ball on the table",
-          "clip": ["30", 1]
-        },
-        "class_type": "CLIPTextEncode",
-        "_meta": {
-          "title": "CLIP Text Encode (Positive Prompt)"
-        }
-      }
-    },
-    "images": [
-      {
-        "name": "input_image_1.png",
-        "image": "data:image/png;base64,iVBOR..."
-      }
-    ]
-  }
-}
-```
-
-The following tables describe the fields within the `input` object:
-
-| Field Path       | Type   | Required | Description                                                                                                                                |
-| ---------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `input`          | Object | Yes      | Top-level object containing request data.                                                                                                  |
-| `input.workflow` | Object | Yes      | The ComfyUI workflow exported in the [required format](#getting-the-workflow-json).                                                        |
-| `input.images`   | Array  | No       | Optional array of input images. Each image is uploaded to ComfyUI's `input` directory and can be referenced by its `name` in the workflow. |
-
-#### `input.images` Object
-
-Each object within the `input.images` array must contain:
-
-| Field Name | Type   | Required | Description                                                                                                                       |
-| ---------- | ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `name`     | String | Yes      | Filename used to reference the image in the workflow (e.g., via a "Load Image" node). Must be unique within the array.            |
-| `image`    | String | Yes      | Base64 encoded string of the image. A data URI prefix (e.g., `data:image/png;base64,`) is optional and will be handled correctly. |
-
-> [!NOTE]
->
-> **Size Limits:** RunPod endpoints have request size limits (e.g., 10MB for `/run`, 20MB for `/runsync`). Large base64 input images can exceed these limits. See [RunPod Docs](https://docs.runpod.io/docs/serverless-endpoint-urls).
-
-### Output
-
-> [!WARNING]
->
-> **Breaking Change in Output Format (5.0.0+)**
->
-> Versions `< 5.0.0` returned the primary image data (S3 URL or base64 string) directly within an `output.message` field.
-> Starting with `5.0.0`, the output format has changed significantly, see below
+Send POST requests to `/predict` with the following JSON structure:
 
 ```json
 {
-  "id": "sync-uuid-string",
-  "status": "COMPLETED",
-  "output": {
-    "images": [
-      {
-        "filename": "ComfyUI_00001_.png",
-        "type": "base64",
-        "data": "iVBORw0KGgoAAAANSUhEUg..."
-      }
-    ]
-  },
-  "delayTime": 123,
-  "executionTime": 4567
+  "workflow": { ... },  // ComfyUI workflow JSON
+  "images": [           // Optional: input images
+    {
+      "name": "input.png",
+      "image": "base64_encoded_image_data"
+    }
+  ]
 }
 ```
 
-| Field Path      | Type             | Required | Description                                                                                                 |
-| --------------- | ---------------- | -------- | ----------------------------------------------------------------------------------------------------------- |
-| `output`        | Object           | Yes      | Top-level object containing the results of the job execution.                                               |
-| `output.images` | Array of Objects | No       | Present if the workflow generated images. Contains a list of objects, each representing one output image.   |
-| `output.errors` | Array of Strings | No       | Present if non-fatal errors or warnings occurred during processing (e.g., S3 upload failure, missing data). |
+### Response Format
 
-#### `output.images`
+Successful responses return:
 
-Each object in the `output.images` array has the following structure:
+```json
+{
+  "status": "success",
+  "prompt_id": "uuid",
+  "images": [
+    {
+      "filename": "output.png",
+      "subfolder": "",
+      "type": "output",
+      "image": "base64_encoded_image_data"
+    }
+  ],
+  "outputs": { ... }
+}
+```
 
-| Field Name | Type   | Description                                                                                     |
-| ---------- | ------ | ----------------------------------------------------------------------------------------------- |
-| `filename` | String | The original filename assigned by ComfyUI during generation.                                    |
-| `type`     | String | Indicates the format of the data. Either `"base64"` or `"s3_url"` (if S3 upload is configured). |
-| `data`     | String | Contains either the base64 encoded image string or the S3 URL for the uploaded image file.      |
+## Deployment
 
-> [!NOTE]
-> The `output.images` field provides a list of all generated images (excluding temporary ones).
->
-> - If S3 upload is **not** configured (default), `type` will be `"base64"` and `data` will contain the base64 encoded image string.
-> - If S3 upload **is** configured, `type` will be `"s3_url"` and `data` will contain the S3 URL. See the [Configuration Guide](docs/configuration.md#example-s3-response) for an S3 example response.
-> - Clients interacting with the API need to handle this list-based structure under `output.images`.
+### Prerequisites
+
+1. Enable required Google Cloud APIs:
+   ```bash
+   gcloud services enable cloudrun.googleapis.com
+   gcloud services enable artifactregistry.googleapis.com
+   gcloud services enable compute.googleapis.com
+   ```
+
+2. Request L4 GPU quota in your desired region (e.g., `us-central1`).
+
+3. Create an Artifact Registry repository:
+   ```bash
+   gcloud artifacts repositories create comfyui \
+     --repository-format=docker \
+     --location=us-central1 \
+     --description="ComfyUI Docker repository"
+   ```
+
+### Build and Deploy
+
+1. **Build the Docker image:**
+   ```bash
+   docker build \
+     --build-arg MODEL_TYPE=flux1-dev-fp8 \
+     --build-arg HUGGINGFACE_ACCESS_TOKEN=your_token \
+     -t us-central1-docker.pkg.dev/YOUR_PROJECT/comfyui/comfyui:latest \
+     .
+   ```
+
+2. **Push to Artifact Registry:**
+   ```bash
+   docker push us-central1-docker.pkg.dev/YOUR_PROJECT/comfyui/comfyui:latest
+   ```
+
+3. **Deploy to Cloud Run:**
+   ```bash
+   gcloud run deploy comfyui \
+     --image=us-central1-docker.pkg.dev/YOUR_PROJECT/comfyui/comfyui:latest \
+     --region=us-central1 \
+     --platform=managed \
+     --gpu=1 \
+     --gpu-type=l4 \
+     --memory=32Gi \
+     --cpu=8 \
+     --allow-unauthenticated \
+     --timeout=900 \
+     --concurrency=1 \
+     --min-instances=0 \
+     --max-instances=3
+   ```
+
+### Using the Deployment Script
+
+Use the provided deployment script for easier deployment:
+
+```bash
+chmod +x deploy.sh
+./deploy.sh YOUR_PROJECT_ID us-central1 latest
+```
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `COMFY_LOG_LEVEL` | ComfyUI logging level | `DEBUG` |
+| `WEBSOCKET_RECONNECT_ATTEMPTS` | WebSocket reconnection attempts | `5` |
+| `WEBSOCKET_RECONNECT_DELAY_S` | Delay between reconnection attempts | `3` |
+| `WEBSOCKET_TRACE` | Enable WebSocket trace logging | `false` |
+
+## Limitations
+
+- **Single request processing**: Due to GPU memory constraints, only one request is processed at a time (`concurrency=1`).
+- **Cold start time**: Initial requests may take 1-2 minutes to start the service.
+- **Memory limits**: 32GB memory limit may restrict very large workflows.
+- **Timeout**: Maximum execution time is 15 minutes (900 seconds).
 
 ## Usage
 
-To interact with your deployed RunPod endpoint:
+To interact with your deployed Cloud Run endpoint:
 
-1.  **Get API Key:** Generate a key in RunPod [User Settings](https://www.runpod.io/console/serverless/user/settings) (`API Keys` section).
-2.  **Get Endpoint ID:** Find your endpoint ID on the [Serverless Endpoints](https://www.runpod.io/console/serverless/user/endpoints) page or on the `Overview` page of your endpoint.
+1.  **Get API Key:** Not required for Cloud Run.
+2.  **Get Endpoint ID:** Find your endpoint URL on the [Cloud Run dashboard](https://console.cloud.google.com/run).
 
 ### Generate Image (Sync Example)
 
-Send a workflow to the `/runsync` endpoint (waits for completion). Replace `<api_key>` and `<endpoint_id>`. The `-d` value should contain the [JSON input described above](#input).
+Send a workflow to the `/predict` endpoint (waits for completion). Replace `<endpoint_url>` with your Cloud Run endpoint URL. The `-d` value should contain the [JSON input described above](#request-format).
 
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer <api_key>" \
   -H "Content-Type: application/json" \
-  -d '{"input":{"workflow":{... your workflow JSON ...}}}' \
-  https://api.runpod.ai/v2/<endpoint_id>/runsync
+  -d '{"workflow":{... your workflow JSON ...}}' \
+  https://<endpoint_url>/predict
 ```
 
-You can also use the `/run` endpoint for asynchronous jobs and then poll the `/status` to see when the job is done. Or you [add a `webhook` into your request](https://docs.runpod.io/serverless/endpoints/send-requests#webhook-notifications) to be notified when the job is done.
+You can also use the `/predict` endpoint for asynchronous jobs and then poll the `/status` to see when the job is done. Or you [add a `webhook` into your request](https://cloud.google.com/run/docs/triggering/notifications) to be notified when the job is done.
 
 Refer to [`test_input.json`](./test_input.json) for a complete input example.
 
@@ -176,12 +194,12 @@ To get the correct `workflow` JSON for the API:
 
 1.  Open ComfyUI in your browser.
 2.  In the top navigation, select `Workflow > Export (API)`
-3.  A `workflow.json` file will be downloaded. Use the content of this file as the value for the `input.workflow` field in your API requests.
+3.  A `workflow.json` file will be downloaded. Use the content of this file as the value for the `workflow` field in your API requests.
 
 ## Further Documentation
 
-- **[Deployment Guide](docs/deployment.md):** Detailed steps for deploying on RunPod.
-- **[Configuration Guide](docs/configuration.md):** Full list of environment variables (including S3 setup).
+- **[Deployment Guide](docs/deployment.md):** Detailed steps for deploying on Google Cloud Run.
+- **[Configuration Guide](docs/configuration.md):** Full list of environment variables.
 - **[Customization Guide](docs/customization.md):** Adding custom models and nodes (Network Volumes, Docker builds).
 - **[Development Guide](docs/development.md):** Setting up a local environment for development & testing
 - **[CI/CD Guide](docs/ci-cd.md):** Information about the automated Docker build and publish workflows.
