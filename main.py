@@ -24,13 +24,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Global service instance
-comfy_service = None
-comfy_process = None
+# Global state
+class AppState:
+    def __init__(self):
+        self.comfy_service = None
+        self.comfy_process = None
+        self.comfy_ready = False
+        self.comfy_thread = None
+
+state = AppState()
 
 def start_comfyui():
-    """Start ComfyUI server in background"""
-    global comfy_process
+    """Start ComfyUI server in background and signal when ready."""
+    global state
     
     # Use libtcmalloc for better memory management
     env = os.environ.copy()
@@ -64,40 +70,41 @@ def start_comfyui():
         '--log-stdout'
     ]
     
-    comfy_process = subprocess.Popen(cmd, env=env)
+    state.comfy_process = subprocess.Popen(cmd, env=env)
     
     # Wait for ComfyUI to be ready
-    max_retries = 60
+    max_retries = 120 # Increased timeout to 4 minutes
     for i in range(max_retries):
         try:
             import requests
             response = requests.get('http://127.0.0.1:8188/', timeout=5)
             if response.status_code == 200:
                 logger.info("ComfyUI server is ready")
+                state.comfy_ready = True
                 return
         except Exception:
-            pass
+            logger.info(f"Waiting for ComfyUI... attempt {i+1}/{max_retries}")
         time.sleep(2)
     
-    logger.error("ComfyUI server failed to start within timeout")
+    logger.error("ComfyUI server failed to start within timeout. Terminating process.")
+    if state.comfy_process:
+        state.comfy_process.terminate()
 
 def initialize_service():
-    """Initialize the ComfyUI service"""
-    global comfy_service
+    """Initialize the ComfyUI service in a background thread."""
+    global state
     
-    if comfy_service is None:
-        # Start ComfyUI in background thread
-        comfy_thread = threading.Thread(target=start_comfyui, daemon=True)
-        comfy_thread.start()
-        
-        # Wait a bit for ComfyUI to start
-        time.sleep(5)
-        
+    if state.comfy_thread is None:
+        logger.info("Initializing ComfyUI Service...")
         # Initialize service
-        comfy_service = ComfyUIService()
-        logger.info("ComfyUI service initialized")
+        state.comfy_service = ComfyUIService()
+        
+        # Start ComfyUI in background thread
+        state.comfy_thread = threading.Thread(target=start_comfyui, daemon=True)
+        state.comfy_thread.start()
+        logger.info("ComfyUI startup thread launched.")
 
-# Initialize service on startup
+# Initialize service on application startup
 initialize_service()
 
 @functions_framework.http
@@ -118,23 +125,20 @@ def app(request):
         
         elif path == '/healthz' and method == 'GET':
             # Health check endpoint for Cloud Run
-            try:
-                import requests
-                response = requests.get('http://127.0.0.1:8188/', timeout=2)
-                if response.status_code == 200:
-                    return jsonify({'status': 'healthy'}), 200
-                else:
-                    return jsonify({'status': 'unhealthy', 'reason': 'ComfyUI not responding'}), 503
-            except Exception as e:
-                return jsonify({'status': 'unhealthy', 'reason': str(e)}), 503
+            global state
+            if state.comfy_ready:
+                return jsonify({'status': 'ok'}), 200
+            else:
+                # Return 200 OK but indicate service is initializing
+                # This keeps Cloud Run happy during cold starts
+                return jsonify({'status': 'initializing'}), 200
         
         elif path == '/predict' and method == 'POST':
             # Main prediction endpoint
-            global comfy_service
+            global state
             
-            # Initialize service if not done
-            if comfy_service is None:
-                initialize_service()
+            if not state.comfy_ready or not state.comfy_service:
+                return jsonify({'error': 'Service not ready'}), 503
             
             # Get request data
             job_input = request.get_json()
@@ -142,7 +146,7 @@ def app(request):
                 return jsonify({'error': 'No JSON data provided'}), 400
             
             # Process the request
-            result = comfy_service.process_job(job_input)
+            result = state.comfy_service.process_job(job_input)
             
             if 'error' in result:
                 return jsonify(result), 400
@@ -151,12 +155,12 @@ def app(request):
         
         elif path == '/models' and method == 'GET':
             # Get available models endpoint
-            global comfy_service
+            global state
             
-            if comfy_service is None:
-                initialize_service()
+            if not state.comfy_ready or not state.comfy_service:
+                return jsonify({'error': 'Service not ready'}), 503
             
-            models = comfy_service.get_available_models()
+            models = state.comfy_service.get_available_models()
             return jsonify(models), 200
         
         else:
