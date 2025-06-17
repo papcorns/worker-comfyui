@@ -116,6 +116,7 @@ def app(request):
     method = request.method
     
     try:
+        
         if path == '/' and method == 'GET':
             return jsonify({
                 'status': 'ok',
@@ -125,7 +126,6 @@ def app(request):
         
         elif path == '/healthz' and method == 'GET':
             # Health check endpoint for Cloud Run
-            global state
             if state.comfy_ready:
                 return jsonify({'status': 'ok'}), 200
             else:
@@ -134,8 +134,7 @@ def app(request):
                 return jsonify({'status': 'initializing'}), 200
         
         elif path == '/predict' and method == 'POST':
-            # Main prediction endpoint
-            global state
+ 
             
             if not state.comfy_ready or not state.comfy_service:
                 return jsonify({'error': 'Service not ready'}), 503
@@ -155,7 +154,6 @@ def app(request):
         
         elif path == '/models' and method == 'GET':
             # Get available models endpoint
-            global state
             
             if not state.comfy_ready or not state.comfy_service:
                 return jsonify({'error': 'Service not ready'}), 503
